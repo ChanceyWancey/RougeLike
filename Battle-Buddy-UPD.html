@@ -158,7 +158,7 @@
 <body>
     <div id="mainMenu" class="menu">
         <h1>ROGUELIKE DUNGEON</h1>
-        <div id="updateText" style="color:#44ff44; margin:10px 0; font-size:18px; font-weight: bold;">BATTLE BUDDY UPDATE</div>
+        <div id="updateText" style="color:#44ff44; margin:10px 0; font-size:18px; font-weight: bold;">NEW UPGRADES UPDATE</div>
         <div class="legend">
             <div class="legend-item">
                 <div class="color-box" style="background: #4444ff;"></div>
@@ -173,6 +173,28 @@
                 <span>Orange Squares - Weapons (+2 ATK)</span>
             </div>
         </div>
+
+        <!-- Simple in-menu update / changelog box -->
+        <div id="updateLog" style="margin-top:18px; text-align:left; max-width:420px; margin-left:auto; margin-right:auto; background:#111; border:2px solid #444; padding:12px; font-size:14px; max-height:200px; overflow-y:auto;">
+            <div style="font-weight:bold; color:#ffaa00; margin-bottom:6px;">Update Log</div>
+            <div style="margin-bottom:8px;">
+                <div style="color:#888; font-size:12px;">2025-12-16</div>
+                <div>- Added <strong>six upgrades</strong> (each designed with 10 upgrade levels):</div>
+                <div style="margin-left:10px; color:#aaa;">
+                    • <strong>Arcane Dash</strong> – Short-range blink to slip past enemies and traps (Lv.1–10).<br>
+                    • <strong>Temporal Bubble</strong> – Briefly slows enemies in a small radius around you (Lv.1–10).<br>
+                    • <strong>Life Steal</strong> – Chance to heal 1 HP when killing an enemy (Lv.1–10).<br>
+                    • <strong>Runic Armor</strong> – Chance to negate incoming damage with protective runes (Lv.1–10).<br>
+                    • <strong>Chain Lightning</strong> – Attacks can arc to additional nearby enemies (Lv.1–10).<br>
+                    • <strong>Grave Pact</strong> – Dropping low on HP can summon spectral allies temporarily (Lv.1–10).
+                </div>
+            </div>
+            <div>
+                <div style="color:#888; font-size:12px;">2025-12-16</div>
+                <div style="color:#aaa;">Battle Buddy update: added a ranged ally that automatically shoots at enemies.</div>
+            </div>
+        </div>
+
         <div style="margin-top:18px;">
             <button onclick="showDifficultyMenu()" style="min-width:160px; font-size:20px; padding:12px 18px;">PLAY</button>
             <button onclick="showTutorial()" style="min-width:160px; font-size:20px; padding:12px 18px; margin-left:12px; background:#44aa44;">TUTORIAL</button>
@@ -457,8 +479,17 @@
             if (!gameState.player.lastShieldAttempt) gameState.player.lastShieldAttempt = 0;
             if (now - gameState.player.lastShieldAttempt < stats.cooldown) return false;
             gameState.player.lastShieldAttempt = now;
-            if (Math.random() < stats.chance) {
-                gameState.message = `Shield blocked the attack! (Lv${lvl})`;
+            let blockChance = stats.chance;
+            // Runic Armor adds extra flat block chance
+            const runicLvl = gameState.player.runicArmorLevel || 0;
+            if (runicLvl > 0) {
+                blockChance += 0.03 * runicLvl; // up to +30% at Lv10
+            }
+
+            if (Math.random() < blockChance) {
+                gameState.message = runicLvl > 0
+                    ? `Runic Armor flares and blocks the attack! (Shield Lv${lvl}, Runic Lv${runicLvl})`
+                    : `Shield blocked the attack! (Lv${lvl})`;
                 return true;
             } else {
                 gameState.message = `Shield failed to block. (Lv${lvl})`;
@@ -502,14 +533,33 @@
 
         let gameState = {
             floor: 1,
-            player: { x: 0, y: 0, hp: 20, maxHp: 20, atk: 3, animX: 0, animY: 0, effects: [], gold: 0, hasSawBlades: false, sawBladeLevel: 0,
-                     // NEW shield fields
-                     shieldLevel: 0,
-                     lastShieldAttempt: 0,
-                     // NEW Battle Buddy fields
-                     hasBattleBuddy: false,
-                     battleBuddyLevel: 0,
-                     battleBuddyPosition: null
+            player: {
+                x: 0, y: 0,
+                hp: 20, maxHp: 20, atk: 3,
+                animX: 0, animY: 0,
+                effects: [],
+                gold: 0,
+                hasSawBlades: false,
+                sawBladeLevel: 0,
+                // NEW shield fields
+                shieldLevel: 0,
+                lastShieldAttempt: 0,
+                // NEW Battle Buddy fields
+                hasBattleBuddy: false,
+                battleBuddyLevel: 0,
+                battleBuddyPosition: null,
+                // NEW advanced upgrade levels (all max 10)
+                arcaneDashLevel: 0,
+                temporalBubbleLevel: 0,
+                lifeStealLevel: 0,
+                runicArmorLevel: 0,
+                chainLightningLevel: 0,
+                gravePactLevel: 0,
+                lastDashTime: 0,
+                lastBubbleTime: 0,
+                gravePactTriggeredFloor: 0,
+                lastMoveDx: 0,
+                lastMoveDy: 0
             },
             map: [],
             enemies: [],
@@ -615,6 +665,18 @@
             }
         }
 
+        function applyLifeSteal() {
+            const lvl = gameState.player.lifeStealLevel || 0;
+            if (lvl <= 0) return;
+            const chance = 0.03 + (lvl - 1) * 0.01; // 3% -> 12%
+            if (Math.random() < chance) {
+                if (gameState.player.hp < gameState.player.maxHp) {
+                    gameState.player.hp = Math.min(gameState.player.hp + 1, gameState.player.maxHp);
+                    gameState.message += ` Life Steal healed +1 HP (Lv${lvl}).`;
+                }
+            }
+        }
+
         function updateEffects() {
             const now = Date.now();
             
@@ -650,6 +712,7 @@
                                 gameState.player.gold += goldDrop;
                                 gameState.enemies = gameState.enemies.filter(e => e !== enemy);
                                 gameState.message = 'Enemy died from ' + effect.type + '! +' + goldDrop + ' gold';
+                                applyLifeSteal();
                             }
                         }
                     }
@@ -811,14 +874,33 @@
             
             gameState = {
                 floor: 1,
-                player: { x: 0, y: 0, hp: startHp, maxHp: startHp, atk: startAtk, animX: 0, animY: 0, effects: [], gold: 0, hasSawBlades: false, sawBladeLevel: 0,
-                         // NEW shield fields
-                         shieldLevel: 0,
-                         lastShieldAttempt: 0,
-                         // NEW Battle Buddy fields
-                         hasBattleBuddy: false,
-                         battleBuddyLevel: 0,
-                         battleBuddyPosition: null
+                player: {
+                    x: 0, y: 0,
+                    hp: startHp, maxHp: startHp, atk: startAtk,
+                    animX: 0, animY: 0,
+                    effects: [],
+                    gold: 0,
+                    hasSawBlades: false,
+                    sawBladeLevel: 0,
+                    // NEW shield fields
+                    shieldLevel: 0,
+                    lastShieldAttempt: 0,
+                    // NEW Battle Buddy fields
+                    hasBattleBuddy: false,
+                    battleBuddyLevel: 0,
+                    battleBuddyPosition: null,
+                    // NEW advanced upgrade levels (all max 10)
+                    arcaneDashLevel: 0,
+                    temporalBubbleLevel: 0,
+                    lifeStealLevel: 0,
+                    runicArmorLevel: 0,
+                    chainLightningLevel: 0,
+                    gravePactLevel: 0,
+                    lastDashTime: 0,
+                    lastBubbleTime: 0,
+                    gravePactTriggeredFloor: 0,
+                    lastMoveDx: 0,
+                    lastMoveDy: 0
                 },
                 map: [],
                 enemies: [],
@@ -1161,7 +1243,15 @@
             updateProjectiles();
             updateSawBlades(deltaTime);
             
-            if (currentTime - gameState.lastEnemyMove >= gameState.currentMoveInterval && !gameState.isAnimating) {
+            // Temporal Bubble: when active, slow enemy movement
+            let interval = gameState.currentMoveInterval;
+            if (gameState.temporalBubbleActiveUntil && currentTime < gameState.temporalBubbleActiveUntil) {
+                const lvl = gameState.player.temporalBubbleLevel || 0;
+                const slowFactor = 1.4 + lvl * 0.08; // enemies move up to ~2.2x slower
+                interval *= slowFactor;
+            }
+
+            if (currentTime - gameState.lastEnemyMove >= interval && !gameState.isAnimating) {
                 gameState.lastEnemyMove = currentTime;
                 moveEnemies();
             }
@@ -1229,6 +1319,7 @@
                             gameState.player.gold += goldDrop;
                             gameState.enemies = gameState.enemies.filter(e => e !== enemy);
                             gameState.message = `Saw blade killed enemy! +${goldDrop} gold`;
+                            applyLifeSteal();
                         }
                     }
                 });
@@ -2052,6 +2143,73 @@
                     </div>
                 `;
             }
+
+            // NEW: Advanced upgrades shop UI (each up to Lv.10)
+            function buildLevelledUpgradeSection(label, key, desc, baseCost, costStep) {
+                const lvl = gameState.player[key] || 0;
+                if (lvl >= 10) {
+                    return `
+                        <div style="background: #1a1a1a; padding: 20px; margin: 15px 0; border: 2px solid #44ff44;">
+                            <h3 style="color: #44ff44; margin: 0 0 10px 0;">${label} MAX (Lv.10)</h3>
+                            <p style="margin: 5px 0; color: #aaa;">${desc}</p>
+                            <p style="margin: 5px 0; color: #888; font-style: italic;">Fully upgraded</p>
+                        </div>
+                    `;
+                }
+                const next = lvl + 1;
+                const cost = baseCost + (next - 1) * costStep;
+                return `
+                    <div style="background: #1a1a1a; padding: 20px; margin: 15px 0; border: 2px solid #ffaa00;">
+                        <h3 style="color: #ffaa00; margin: 0 0 10px 0;">${label} (Lv.${next})</h3>
+                        <p style="margin: 5px 0; color: #aaa;">${desc}</p>
+                        <p style="margin: 5px 0; color: #ffd700; font-size: 18px; font-weight: bold;">Cost: ${cost} Gold</p>
+                        <button onclick="buyItem('${key}', ${cost}, ${next})" style="background: #ffaa00; color: #fff; border: none; padding: 10px 20px; font-size: 16px; font-family: 'Courier New', monospace; cursor: pointer; margin-top: 10px;">UPGRADE</button>
+                    </div>
+                `;
+            }
+
+            const arcaneDashHTML = buildLevelledUpgradeSection(
+                'Arcane Dash',
+                'arcaneDashLevel',
+                'Unlock a short-range blink (Press Q). Higher levels reduce cooldown and increase range.',
+                400,
+                80
+            );
+            const temporalBubbleHTML = buildLevelledUpgradeSection(
+                'Temporal Bubble',
+                'temporalBubbleLevel',
+                'Activate a slow field around you (Press E). Higher levels increase duration and slow strength.',
+                450,
+                90
+            );
+            const lifeStealHTML = buildLevelledUpgradeSection(
+                'Life Steal',
+                'lifeStealLevel',
+                'Chance to heal 1 HP when killing an enemy. Higher levels increase the chance.',
+                350,
+                70
+            );
+            const runicArmorHTML = buildLevelledUpgradeSection(
+                'Runic Armor',
+                'runicArmorLevel',
+                'Runes can negate incoming damage. Higher levels increase negate chance.',
+                500,
+                100
+            );
+            const chainLightningHTML = buildLevelledUpgradeSection(
+                'Chain Lightning',
+                'chainLightningLevel',
+                'Your attacks can arc to nearby enemies. Higher levels increase bounce chance and damage.',
+                550,
+                110
+            );
+            const gravePactHTML = buildLevelledUpgradeSection(
+                'Grave Pact',
+                'gravePactLevel',
+                'Dropping to low HP can summon spectral allies. Higher levels spawn more/stronger allies.',
+                600,
+                120
+            );
             
             shopMenu.innerHTML = `
                 <h1 style="color: #00ffff;">SHOP</h1>
@@ -2060,6 +2218,12 @@
                 <div style="max-width: 500px; margin: 20px auto;">
                     ${shieldHTML}
                     ${buddyHTML}
+                    ${arcaneDashHTML}
+                    ${temporalBubbleHTML}
+                    ${lifeStealHTML}
+                    ${runicArmorHTML}
+                    ${chainLightningHTML}
+                    ${gravePactHTML}
                     <div style="background: #1a1a1a; padding: 20px; margin: 15px 0; border: 2px solid #ff44ff;">
                         <h3 style="color: #ff44ff; margin: 0 0 10px 0;">Health Potion</h3>
                         <p style="margin: 5px 0; color: #aaa;">Restore 20 HP</p>
@@ -2160,6 +2324,23 @@
                         alert('Battle Buddy upgrade failed.');
                     }
                     break;
+
+                // NEW advanced upgrades (all value = next level 1..10)
+                case 'arcaneDashLevel':
+                case 'temporalBubbleLevel':
+                case 'lifeStealLevel':
+                case 'runicArmorLevel':
+                case 'chainLightningLevel':
+                case 'gravePactLevel':
+                    const nextLvl = value;
+                    const key = type;
+                    if (gameState.player[key] < nextLvl && nextLvl <= 10) {
+                        gameState.player[key] = nextLvl;
+                        alert(`${key.replace(/Level$/,'')} upgraded to Lv.${nextLvl}!`);
+                    } else {
+                        alert('Upgrade failed.');
+                    }
+                    break;
             }
             
             document.getElementById('shopGold').textContent = gameState.player.gold;
@@ -2178,6 +2359,34 @@
             animate();
         };
 
+        function tryGravePactTrigger() {
+            const lvl = gameState.player.gravePactLevel || 0;
+            if (lvl <= 0) return;
+            if (gameState.player.gravePactTriggeredFloor === gameState.floor) return;
+            
+            const thresholdPct = 0.35 - (lvl - 1) * 0.02; // 35% -> 17% over 10 levels
+            if (gameState.player.hp > Math.max(1, Math.floor(gameState.player.maxHp * thresholdPct))) return;
+            
+            gameState.player.gravePactTriggeredFloor = gameState.floor;
+            const alliesToSpawn = 1 + Math.floor(lvl / 3); // 1..4 allies
+            
+            for (let i = 0; i < alliesToSpawn; i++) {
+                const pos = findSpawnPositionNearPlayer();
+                if (!pos) break;
+                gameState.shadowClones.push({
+                    x: pos.x,
+                    y: pos.y,
+                    animFromX: pos.x,
+                    animFromY: pos.y,
+                    life: 10 + lvl * 2,
+                    atk: Math.max(1, Math.floor(gameState.player.atk * (0.25 + lvl * 0.05)))
+                });
+            }
+            
+            gameState.message = `Grave Pact activated! Spectral allies rise to defend you (Lv${lvl}).`;
+            updateUI();
+        }
+
         function movePlayer(dx, dy) {
             if (gameState.isAnimating || gameState.isTransitioning) return;
 
@@ -2187,6 +2396,9 @@
                 updateUI();
                 return;
             }
+
+            gameState.player.lastMoveDx = dx;
+            gameState.player.lastMoveDy = dy;
 
             const newX = gameState.player.x + dx;
             const newY = gameState.player.y + dy;
@@ -2207,6 +2419,7 @@
                     gameState.player.gold += goldDrop;
                     gameState.enemies = gameState.enemies.filter(e => e !== enemy);
                     gameState.message = `DIVINE JUDGMENT! Enemy instantly vanquished! +${goldDrop} gold`;
+                    applyLifeSteal();
                     gameState.player.effects = gameState.player.effects.filter(e => e.type !== 'bleeding');
                     updateUI();
                     return;
@@ -2223,6 +2436,47 @@
 
                 createShadowClone(gameState.player, true);
 
+                // Chain Lightning: chance to arc to nearby enemies
+                const clLvl = gameState.player.chainLightningLevel || 0;
+                if (clLvl > 0) {
+                    const bounceChance = 0.08 + clLvl * 0.02; // 10%..28%
+                    if (Math.random() < bounceChance) {
+                        const maxBounces = 1 + Math.floor(clLvl / 4); // 1..3
+                        let remaining = maxBounces;
+                        let source = enemy;
+                        while (remaining > 0) {
+                            const candidates = gameState.enemies.filter(e => e !== source);
+                            let target = null;
+                            let bestDist = 3.5; // max chain radius
+                            candidates.forEach(e => {
+                                const dx2 = e.x - source.x;
+                                const dy2 = e.y - source.y;
+                                const dist = Math.sqrt(dx2*dx2 + dy2*dy2);
+                                if (dist < bestDist) {
+                                    bestDist = dist;
+                                    target = e;
+                                }
+                            });
+                            if (!target) break;
+                            
+                            const bonusDmg = Math.max(1, Math.floor(gameState.player.atk * (0.2 + clLvl * 0.04)));
+                            target.hp -= bonusDmg;
+                            gameState.message = `Chain Lightning arcs for ${bonusDmg} bonus damage!`;
+                            
+                            if (target.hp <= 0) {
+                                const goldDrop2 = target.isBoss ? 50 + Math.floor(Math.random() * 51) : 5 + Math.floor(Math.random() * 11);
+                                gameState.player.gold += goldDrop2;
+                                gameState.enemies = gameState.enemies.filter(e => e !== target);
+                                gameState.message += ` ${target.isBoss ? 'BOSS' : 'Enemy'} slain by lightning! +${goldDrop2} gold`;
+                                applyLifeSteal();
+                            }
+                            
+                            source = target;
+                            remaining--;
+                        }
+                    }
+                }
+
                 if (enemy.hp <= 0) {
                     const wasBoss = enemy.isBoss;
                     const bossX = enemy.x;
@@ -2233,6 +2487,7 @@
 
                     gameState.enemies = gameState.enemies.filter(e => e !== enemy);
                     gameState.message = `${enemy.isBoss ? 'BOSS' : 'Enemy'} defeated! +${goldDrop} gold`;
+                    applyLifeSteal();
 
                     const mods = getDifficultyModifiers();
                     if (wasBoss && mods.bossDropsSword) {
@@ -2618,6 +2873,12 @@
                     <p style="margin: 5px 0; color: #aaa;"><strong>Shield:</strong> Blocks incoming attacks (5-25% chance)</p>
                     <p style="margin: 5px 0; color: #aaa;"><strong>Saw Blades:</strong> Passive orbital damage</p>
                     <p style="margin: 5px 0; color: #aaa;"><strong>Battle Buddy:</strong> Ranged ally that shoots enemies</p>
+                    <p style="margin: 5px 0; color: #aaa;"><strong>Arcane Dash (Q):</strong> Short-range blink in your last move direction (Lv.1–10, lower cooldown/longer dash at higher levels)</p>
+                    <p style="margin: 5px 0; color: #aaa;"><strong>Temporal Bubble (E):</strong> Slows enemy movement for a short time (Lv.1–10, stronger and longer at higher levels)</p>
+                    <p style="margin: 5px 0; color: #aaa;"><strong>Life Steal:</strong> Chance to heal 1 HP whenever you kill an enemy (Lv.1–10)</p>
+                    <p style="margin: 5px 0; color: #aaa;"><strong>Runic Armor:</strong> Extra chance to negate incoming damage on top of Shield (Lv.1–10)</p>
+                    <p style="margin: 5px 0; color: #aaa;"><strong>Chain Lightning:</strong> Your attacks can arc to nearby enemies for bonus damage (Lv.1–10)</p>
+                    <p style="margin: 5px 0; color: #aaa;"><strong>Grave Pact:</strong> When your HP gets very low, spectral allies can spawn to help you (Lv.1–10)</p>
                     
                     <h2 style="color: #4444ff; font-size: 20px; margin-top: 15px;">STATUS EFFECTS</h2>
                     <p style="margin: 5px 0; color: #aaa;">• <span style="color: #ff4500;">Fire:</span> Take 1 damage per second</p>
@@ -2747,6 +3008,62 @@
     }
     
     if (!gameState.gameActive) return;
+
+    // Active abilities: Arcane Dash (Q) and Temporal Bubble (E)
+    if (e.key === 'q' || e.key === 'Q') {
+        const lvl = gameState.player.arcaneDashLevel || 0;
+        if (lvl > 0) {
+            const now = Date.now();
+            const baseCd = 4500;
+            const cd = Math.max(1200, baseCd - (lvl - 1) * 300); // 4.5s -> 1.2s
+            if (now - gameState.player.lastDashTime >= cd) {
+                const range = 1 + Math.floor((lvl - 1) / 3); // 1..4 tiles
+                const dx = gameState.player.lastMoveDx || 0;
+                const dy = gameState.player.lastMoveDy || -1;
+                if (dx !== 0 || dy !== 0) {
+                    let finalX = gameState.player.x;
+                    let finalY = gameState.player.y;
+                    for (let i = 0; i < range; i++) {
+                        const nx = finalX + dx;
+                        const ny = finalY + dy;
+                        if (!canMove(nx, ny)) break;
+                        finalX = nx;
+                        finalY = ny;
+                    }
+                    if (finalX !== gameState.player.x || finalY !== gameState.player.y) {
+                        gameState.player.animX = gameState.player.x;
+                        gameState.player.animY = gameState.player.y;
+                        gameState.player.x = finalX;
+                        gameState.player.y = finalY;
+                        gameState.isAnimating = true;
+                        gameState.animationProgress = 0;
+                        gameState.lastDashTime = now;
+                        gameState.message = `Arcane Dash (Lv${lvl}) used!`;
+                        updateUI();
+                        draw();
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    if (e.key === 'e' || e.key === 'E') {
+        const lvl = gameState.player.temporalBubbleLevel || 0;
+        if (lvl > 0) {
+            const now = Date.now();
+            const baseCd = 8000;
+            const cd = Math.max(3000, baseCd - (lvl - 1) * 400); // 8s -> 3s
+            if (now - gameState.player.lastBubbleTime >= cd) {
+                const duration = 2000 + lvl * 300; // 2s -> 5s
+                gameState.player.lastBubbleTime = now;
+                gameState.temporalBubbleActiveUntil = now + duration;
+                gameState.message = `Temporal Bubble (Lv${lvl}) slows nearby enemies!`;
+                updateUI();
+            }
+        }
+        return;
+    }
     
     switch(e.key) {
         case 'ArrowUp': case 'w': case 'W':
